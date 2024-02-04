@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  <script src="http://d3js.org/d3.v5.min.js" charset="utf-8"></script>
+  <script src="https://unpkg.com/topojson@3.0.2/dist/topojson.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3-legend/2.25.6/d3-legend.min.js"></script>
+  <link rel="stylesheet" href="css/Dashboard.css">
+  <!-- Add dashboard.css link -->
+  <script type="text/javascript" src="js/base.js"></script>
+  <!-- Add base.js line -->
+  <script type="text/javascript" src="js/sparkline.js"></script>
+  <!-- Add sparkline.js link -->
+
+  <!-- sidebar -->
+  <div id="info">
+   <div id="title">
+    World Hunger Map
+   </div>
+   <p>By Kexin Wei</p>
+   <p id="placename"></p>
+    <div id="count" class="card">
+     <h5 id="desc">Total food waste in 2021 (tonnes)</h5>
+     <h5 id="total"></h5>
+     <h5 id="desc">Average food waste per person in 2021 (tonnes)</h5>
+     <h5 id="average"></h5>
+     <p id="county-count"><!--Add a total population in WA in 2020--></p>
+     <h5 id="desc">Hunger Trend Graphy</h5>
+    </div>
+    <div id="county-chart"></div>
+    <p></p>
+    <div id="footer">The Global Hunger Index (GHI) is a tool for comprehensively
+measuring and tracking hunger at global, regional, and national
+levels.</div>
+  </div>
+  <!-- mainwindow -->
+  <div id="map"></div>
+  <div id="tooltip"></div>
+  <script>
+      var height = 700;
+      var width = 1000;
+      var projection = d3.geoOrthographic()
+                    .scale(200)
+                    .translate([width/2, height/2])
+      var db = d3.map();
+      var path = d3.geoPath().projection(projection);
+      var svg = d3.select("#map")
+              .append("svg")
+              .attr("width", width)
+              .attr("height", height);
+
+      Promise.all([d3.json('data/world-110.json'), d3.csv('data/2021.csv'), d3.csv('data/FWD.csv')])
+
+                .then(function ready(loadData) {
+                  //loading data
+              var world = loadData[0]
+              var data = loadData[1]
+              var waste = loadData[2]
+              //organizing Data
+              var countries = topojson.feature(world, world.objects.ne_110m_admin_0_countries);
+              var forest = d3.nest().key(function(d){return d.country}).map(data);
+              var forestbyCountry = new Map(data.map(d => [d.country, +d.y2021]));
+              var colorScale = d3.scaleSequential().domain([0,70]).interpolator(d3.interpolate("green", "red"));
+              var wasteTotal = new Map(waste.map(d => [d.Country, +d.Household_estimate_total]));
+              var wasteAve = new Map(waste.map(d => [d.Country, +d.Household_estimate_ave]));
+
+       var graticule = d3.geoGraticule();
+
+       function zoomed() {
+                 var e = d3.event;
+                 var currentRotateX = rotateScale(e.transform.x) % 360;
+                 //make the globe roll around up and down
+                 var currentRotateY = rotateScale(e.transform.y) % 360;
+
+                 projection.rotate([currentRotateX, currentRotateY])
+                           .scale(e.transform.k)
+                 d3.selectAll("path.graticule").attr("d", path);
+                 d3.selectAll("path.country").attr("d", path)
+             }
+
+       //function for zoom goes here
+       var mapZoom = d3.zoom().on("zoom", zoomed);
+
+          //Orthographic should start out untranslated
+        var zoomSettings = d3.zoomIdentity
+            .translate(0, 0)
+            .scale(200);
+
+          //This scale will be used to transform for x-zoom to degrees
+        var rotateScale = d3.scaleLinear()
+                              .domain([-500, 0, 500])
+                              .range([-180, 0, 180]);
+
+        d3.select("svg").call(mapZoom).call(mapZoom.transform, zoomSettings);
+
+      var setDb = function(data) {
+          data.forEach(function(d) {
+            db.set(d.country, [
+               {"x": 2000, "y": +d.y2000},
+               {"x": 2006, "y": +d.y2006},
+               {"x": 2012, "y": +d.y2012},
+               {"x": 2021, "y": +d.y2021}
+            ]);
+          });
+        };
+       setDb(data);
+
+       var sparkline = d3.charts.sparkline()
+                     .height(260)
+                     .width(310);
+
+        var chartmargin = {top: 10, right: 75, bottom: 30, left: 30},
+        chartwidth = 400 - chartmargin.left - chartmargin.right,
+        chartheight = 300 - chartmargin.top - chartmargin.bottom;
+
+        // create svg element
+        var chart = d3.select("#county-chart")
+            .append("svg")
+            .attr("width", chartwidth + chartmargin.left + chartmargin.right)
+            .attr("height", chartheight + chartmargin.top + chartmargin.bottom)
+            .append("g").attr('class', 'line')
+            .attr("transform","translate(" + chartmargin.left + "," + chartmargin.top + ")");
+
+        // Create the scale
+        var x = d3.scaleLinear()
+              .domain([2000, 2021])         // This is what is written on the Axis: from 0 to 100
+              .range([0, chartwidth]);       // This is where the axis is placed: from 0px to 400px
+        // Draw the axis
+        chart.append("g")
+             .attr("transform", "translate(0," + chartheight + ")")
+             .call(d3.axisBottom(x).ticks(6));
+
+      // add a legend
+      svg.append("g")
+          .attr("class", "legend")
+          .attr("transform", "translate(550,50)");
+
+      var legendLinear = d3.legendColor()
+          .shapeWidth(80)
+          .orient('horizontal')
+          .scale(colorScale);
+
+      svg.select(".legend")
+          .call(legendLinear);
+
+      var hover = function(d) {
+       var t = document.getElementById('total');
+          t.innerHTML = wasteTotal.get(d.properties.admin) + "<br/> "
+       var a = document.getElementById('average');
+          a.innerHTML = wasteAve.get(d.properties.admin) + "<br/> "
+       var div = document.getElementById('county-count');
+          d3.select(this).style('stroke', 'lightSteelBlue').style('stroke-width', 5)
+          .style('stroke-dasharray', ('3 3'))
+          div.innerHTML = d.properties.admin + "<br/> "
+       var divChart = document.getElementById('county-chart')
+       chart.datum(db.get(d.properties.admin)).call(sparkline.draw);
+      }
+
+      var out = function(d){
+              var div = document.getElementById('county-count')
+              d3.select(this).transition().duration(500)
+                  .style('stroke', function(d){return 'transparent'})
+              var divChart = document.getElementById('county-chart')
+              chart.select('svg').remove();
+      }
+
+      // function for making a map goes here
+      svg.selectAll("path")
+       .data(countries.features)
+       .enter()
+       .append("path")
+       .attr("d", path)
+       .attr("class", "country")
+       .style("fill", function (d) {return colorScale(forestbyCountry.get(d.properties.admin));})
+       .style("stroke", '#fff')
+       .on("mouseover", hover)
+       .on("mouseout", out)
+       d3.select("#map")
+         .select("svg")
+         .insert("path", "path.country")
+         .datum(graticule)
+         .attr("class", "graticule line")
+         .attr("d", path)
+         .attr("fill", "aliceblue")
+      });
+
+
+  </script>
+</body>
+</html>
